@@ -40,8 +40,8 @@ difft = 5;
 kernel_normalize = cell(numIter,1);
 kernels = cell(numIter-1,1);
 dist_mat = cell(numIter-1,1); %just for exploratory purposes
-iters=3
-for k=1:iters
+
+for k=1:numIter-1
     scale_k = centers{k};
     scale_kplus1 = centers{k+1};
     
@@ -62,16 +62,19 @@ for k=1:iters
     disp(size(dist_mat{k}));
 end
 figure
-subplot(1,2,1);
-imagesc(dist_mat{iters})
-title('Diffusion Distances')
-colorbar
-axis image
-subplot(1,2,2);
-imagesc(squareform(pdist(centers{numIter-1})))    
-title('Euclidean Distances')
-colorbar
-axis image
+j=numIter-1
+for i=1:j
+    subplot(2,j,i);
+    imagesc(dist_mat{i})
+    title('Diffusion Distances')
+    colorbar
+    %axis image
+    subplot(2,j,j+i);
+    imagesc(squareform(pdist(centers{i})))    
+    title('Euclidean Distances')
+    colorbar
+end
+%axis image
 
 %% all data
 
