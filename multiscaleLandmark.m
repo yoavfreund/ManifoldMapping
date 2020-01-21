@@ -1,240 +1,250 @@
 clear all; close all; clc;
 
-rng(2019)
-% t = 2*pi*sort(sqrt(rand(10000,1)));
-% t = 2*pi*sort(rand(10000,1));
-% X = [3*cos(t) sin(t)];
 
-t = 2*pi*sort(.9*rand(20000,1));
-X = [cos(t) sin(t)];
-X = X + .01*randn(size(X));
+%% Creating Simple Data, can be ignored for general algorithm
+% data is n x d matrix X
 
-numIter = 7;
+%1D curve with gap
+% N = 50000;
+% d = 2;
+% t = 2*pi*sort(.9*rand(N,1));
+% X = [cos(t) sin(t)];
+% X = X + .03*randn(size(X));
+% scatter(X(:,1),X(:,2),20)
+
+%high dim spheres with 2D plane connecting 
+d=5;
+N1 = 5000; m1=d; %change to make spheres at ends higher dimensional
+N2 = 5000; m2=d; %change to make spheres at ends higher dimensional
+distBetween = 2;
+Nmiddle = 2000; mMiddle = 2;
+thickMiddle = 1;
+
+x1 = randn(N1,m1);
+x1 = bsxfun(@times,x1,1./sqrt(sum(x1.^2,2)));
+[~,ind] = sort(x1(:,1));
+x1 = x1(ind,:);
+
+x2 = randn(N2,m2);
+x2 = bsxfun(@times,x2,1./sqrt(sum(x2.^2,2)));
+x2 = bsxfun(@plus,x2,[distBetween+2,zeros(1,m2-1)]);
+x2 = [x2 zeros(N2,m1-m2)];
+[~,ind] = sort(x2(:,1));
+x2 = x2(ind,:);
+
+x3 = rand(Nmiddle,mMiddle);
+[~,ind] = sort(x3(:,1));
+x3 = x3(ind,:);
+x3 = bsxfun(@times,x3,[2+distBetween,thickMiddle*ones(1,mMiddle-1)]);
+x3 = bsxfun(@minus,x3,[0,thickMiddle/2*ones(1,mMiddle-1)]);
+index1 = sqrt(sum(x3.^2,2))<=1;
+index2 = sqrt(sum( bsxfun(@minus,x3,[2+distBetween,zeros(1,mMiddle-1)]).^2,2))<=1;
+x3(index1 | index2,:) = [];
+x3 = [x3 zeros(size(x3,1),m1 - mMiddle)];
+[~,ind] = sort(x3(:,1));
+x3 = x3(ind,:);
+
+X = [x1;x2;x3];
+scatter3(X(:,1),X(:,2),X(:,3),20);
+axis image
+
+
+
+%% Run kmeans++ with 2^k number of centers
+% currently run in very foolish fashion.  This is heart of what can be
+% adjusted to work in streaming
+
+% returns centers, which is a cell containing the centers from kmeans++ at
+% each level
+% centers{k} = C_k has 2^k points in it.
+
+numIter = 9;
 centers = cell(numIter,1);
 for k = 1:numIter
-    numClust = 2*2^k;
+    numClust = 2^k;
     [L,C] = kmeans_plusplus(X',numClust);
     C = C';
-    [~,ind] = sort(angle(-C(:,1) + 1i*C(:,2)));
-    centers{k} = C(ind,:);
+    
+    % just sorting for visualization purposes
+    if d==2
+        [~,ind] = sort(angle(-C(:,1) + 1i*C(:,2)));
+        centers{k} = C(ind,:);
+    else
+        [~,ind] = sort(C(:,1));
+        centers{k} = C(ind,:);
+    end
     disp(k);
 end
 % centers{numIter+1} = X;
 
 figure
-scatter(X(:,1),X(:,2),20,t,'filled')
-hold on
-scatter(centers{numIter-1}(:,1),centers{numIter-1}(:,2),50,'k','filled')
-axis image
+if d==2
+    scatter(X(:,1),X(:,2),20,t,'filled')
+    hold on
+    scatter(centers{numIter-1}(:,1),centers{numIter-1}(:,2),50,'k','filled')
+    axis image
+else 
+    scatter3(X(:,1),X(:,2),X(:,3),20,'filled')
+    hold on
+    scatter3(centers{numIter-1}(:,1),centers{numIter-1}(:,2), ...
+        centers{numIter-1}(:,3),50,'k','filled')
+    axis image
+end
 
 
-%% K_k is always a bistochastic kernel
+%% Computing affinity between C_k using C_k+1
+% returns kernels, which stores relationships between points in 
 
-difft = 500;
-
-nneighbors = 15;
+%parameter for choosing bandwidth of Gaussian kernel
+% should be some power of intrinsic dimension.  8 coefficient is
+% arbitraray.
+if d==2
+    knnMax = 8*2^1;
+else
+    % choose intrinsic dimension 2 here because we aren't going to be able
+    % to model the spheres at ends correctly due to large dimension
+    knnMax = 8*2^2; 
+end
 
 kernels = cell(numIter-1,1);
-dist_mat = cell(numIter-1,1); %just for exploratory purposes
 for k=1:numIter-1
-    scale_k = centers{k};
-    scale_kplus1 = centers{k+1};
+    C_k = centers{k};
+    C_kplus1 = centers{k+1};
     
-    dist = pdist2(scale_k,scale_kplus1);
+    % distance from points in C_k to points in C_k+1
+    dist = pdist2(C_k,C_kplus1);
+    
+    % choose bandwidth to be average to knnMax nearest neighbor in C_k+1
+    % nneighbors has min for when #|C_k+1| is very small.
+    nneighbors = min(floor(size(centers{k+1},1)/2),knnMax); 
     val = sort(dist,2);
-    
-%     sigma = .25*median(dist(:));
-    sigma = .25*mean(val(:,min(floor(size(centers{k+1},1)/2),nneighbors)));
-    kernels{k}.sigma = sigma;
+    sigma = .25*mean(val(:,nneighbors));
+    kernels{k}.sigma = sigma; %store bandwidth for later calculations on full data
 
+    % compute Gaussian kernel on C_k x C_k+1 at appropriate bandwidth
     A = exp(-dist.^2/sigma.^2);
     
+    % row normalize A so its a transition matrix for a walk starting at
+    % points in C_k and going to points in C_k+1
     A = bsxfun(@times,A,1./sum(A,2));
 
-    if k==1
-        kernels{1}.normalize = 1./sqrt(mean(A,2))';
-    end
+    % estimate sqareroot of density of points in C_k+1
+    % stored if want to use later on full data
     kernels{k+1}.normalize = 1./sqrt(mean(A,1));
+    normalization = kernels{k+1}.normalize/sqrt(size(A,1)); 
 
-    A = bsxfun(@times,A,kernels{k+1}.normalize/sqrt(size(A,1)));
+    % column normalize A
+    A = bsxfun(@times,A,normalization);
           
+    % build affinity between C_k and C_k using diffusion through points in
+    % C_k+1.  Is of use to speed up computation of diffusion times on full
+    % data.
     kernels{k}.K = A*A';
-    
-    dist_mat{k} = squareform(pdist(kernels{k}.K^difft)*sqrt(size(A,1)));
-    
+        
+    % store A, which records which points in C_k+1 are close to points in
+    % C_k.  Is used later to reduce computational complexity
     kernels{k}.hierarchical = A;
 
     disp(k);
 end
-figure
-subplot(1,2,1);
-imagesc(dist_mat{numIter-1})
-title('Diffusion Distances')
-colorbar
-axis image
-subplot(1,2,2);
-imagesc(squareform(pdist(centers{numIter-1})))    
-title('Euclidean Distances')
-colorbar
-axis image
 
 
 
-%% Hierarchical
 
-difft = 500;
+%% Computing affinity between all data and C_k hierarchically and quickly
+% returns A, an N x #|C_k| sparse matrix of affinity to neighbors
+
+% diffusion time for computting diffusion distances at the end
+difft = 250;
+
+% cutoff for what's considered too small of affinity.  Anything below
+% threshold is zeroed out.
 threshold = 1e-2;
 
 fulldata = cell(numIter-1,1);
 for level=1:numIter-1
 
-% could use earlier levels to determine which centers needed for this
-% distance matrix and estimating sigma
-if level==1
-    dist = pdist2(X,centers{level});
-    A = exp(-dist.^2/kernels{level}.sigma.^2);
-    
-    fulldata{level}.A = sparse(A>threshold | bsxfun(@ge,A,max(A,[],2)-eps));
-else
-    A = fulldata{level-1}.A*kernels{level-1}.hierarchical;
-    nearbycenters =  sparse(A>threshold);
-    nearbycenters(sum(nearbycenters,2)==0,:)=ones(sum(sum(nearbycenters,2)==0),...
-        size(centers{level},1));
+    % if on first level, need to measure distance to all centers 
+    if level==1
+        dist = pdist2(X,centers{level});
+        
+        % compute affinity using predetermined bandwidth
+        A = exp(-dist.^2/kernels{level}.sigma.^2);
 
-    nnzeros = sum(sum(nearbycenters));
-    I = zeros(nnzeros,1);
-    J = zeros(nnzeros,1);
-    K = zeros(nnzeros,1);
-    ind = 0;
-    for i=1:size(X,1)
-        nnzeros_i = sum(nearbycenters(i,:));
-        I(ind+1:ind+nnzeros_i) = i*ones(nnzeros_i,1);
-        J(ind+1:ind+nnzeros_i) = find(nearbycenters(i,:)>0)';
-        K(ind+1:ind+nnzeros_i) = pdist2(X(i,:),centers{level}(nearbycenters(i,:)>0,:))';
-        ind = ind+nnzeros_i;
-    end
-%     dist = sparse(I,J,K,size(X,1),size(centers{level},1));
-    A = sparse(I,J,exp(-K.^2/kernels{level}.sigma.^2),size(X,1),size(centers{level},1));
-    
-    fulldata{level}.A = A;%>threshold;
+        % indicator of which centers each point in full data is neighboring.  
+        % Ensures each point has at least one neighbor.
+        % Neighbor if either:
+        % - affinity is greater than threshold
+        % - affinity is largest is row
+        fulldata{level}.A = sparse(A>threshold | bsxfun(@ge,A,max(A,[],2)-eps));
+    else
+        % for full data, find neighbors in C_k+1 using knowledge of neighbors in C_k and
+        % neighborhoods of C_k in C_k+1
+        A = fulldata{level-1}.A*kernels{level-1}.hierarchical;
+        
+        % turn into indicator function of neighbors by checking against threshold
+        nearbycenters =  sparse(A>threshold);
+        
+        % if any point is assigned no neighbors in C_k+1, then set to
+        % measure to all points in C_k+1 since uncertain of location
+        nearbycenters(sum(nearbycenters,2)==0,:)=ones(sum(sum(nearbycenters,2)==0),...
+            size(centers{level},1));
+        
+
+        % for each point in data, measure distance to it's relevant
+        % neighbors in C_k+1 only.  Not all of C_k+1
+        nnzeros = sum(sum(nearbycenters));
+        I = zeros(nnzeros,1);
+        J = zeros(nnzeros,1);
+        K = zeros(nnzeros,1);
+        ind = 0;
+        for i=1:size(X,1)
+            nnzeros_i = sum(nearbycenters(i,:));
+            I(ind+1:ind+nnzeros_i) = i*ones(nnzeros_i,1);
+            J(ind+1:ind+nnzeros_i) = find(nearbycenters(i,:)>0)';
+            K(ind+1:ind+nnzeros_i) = pdist2(X(i,:),centers{level}(nearbycenters(i,:)>0,:))';
+            ind = ind+nnzeros_i;
+        end
+        
+        % compute affinity matrix in sparse format
+        A = sparse(I,J,exp(-K.^2/kernels{level}.sigma.^2),size(X,1),size(centers{level},1));
+
+        
+        
+        % store for next level of centers
+        fulldata{level}.A = sparse(A>threshold);
+    end  
+
+    disp(level);
+
 end
 
+% Row normalize A for all points in data.  Can compute per data point,
+% so it's condusive to streaming
+A = bsxfun(@times,A,1./sum(A,2));  
 
-A = bsxfun(@times,A,1./sum(A,2));  % can compute per data point streaming
-
-% reason use stored row sum here is because otherwise need entire data set
-% to normalize appropriately
-A = bsxfun(@times,A,kernels{level}.normalize/sqrt(size(A,1)));  
-
-disp(level);
-
-end
-
+% Choose a few points from full data to look at diffusion distance matrix
 if size(A,1)<2500
     ind = 1:size(A,1);
 else
     ind = sort(randperm(size(A,1),2500));
 end
+% New featurs of full data stored in matrix A are very sparse.  Can use
+% diffusion time on affinity between C_k and C_k to get larger diffusion
+% neighborhoods
+diffusedData = A(ind,:)* (kernels{level}.K^difft);
+
 
 figure
 subplot(1,2,1);
-% can choose diffusion time to look at more gloal distances
-imagesc(squareform(pdist(A(ind,:)*kernels{level}.K^difft))*sqrt(length(ind)))
+imagesc(squareform(pdist(diffusedData)))
 title('Diffusion Distances')
 colorbar
 axis image
 subplot(1,2,2);
+
+% comparision to Euclidean distance calculation
 imagesc(squareform(pdist(X(ind,:))))
 title('Euclidean Distances')
 colorbar
 axis image
-
-%% Ignore after here, just random notes and other curiousities
-
-%% all data
-
-difft = 100;
-level = numIter-1; %can't do last level because don't have diffusion matrix for it
-
-% could use earlier levels to determine which centers needed for this
-% distance matrix and estimating sigma
-dist = pdist2(X,centers{level});
-% sigma = .25*median(dist(:));
-sigma = kernels{level}.sigma;
-
-A = exp(-dist.^2/sigma.^2);
-A = bsxfun(@times,A,1./sum(A,2));  % can compute per data point streaming
-
-% reason use stored row sum here is because otherwise need entire data set
-% to normalize appropriately
-A = bsxfun(@times,A,kernels{level}.normalize/sqrt(size(A,1)));  
-
-% can choose diffusion time to look at more gloal distances
-A = A*kernels{level}.K^difft;
-
-if size(A,1)<2500
-    figure
-    subplot(1,2,1);
-    imagesc(squareform(pdist(A))*sqrt(size(A,1)))
-    title('Diffusion Distances')
-    colorbar
-    axis image
-    subplot(1,2,2);
-    imagesc(squareform(pdist(X)))
-    title('Euclidean Distances')
-    colorbar
-    axis image
-end
-
-
-%% other direction, also works (so k is centers, k+1 is extended centers)
-difft = 5;
-
-kernels_asym = cell(numIter,1);
-kernels_sym = cell(numIter,1);
-dist_mat = cell(numIter,1);
-for k=2:numIter
-    scale_k = centers{k-1};
-    scale_kplus1 = centers{k};
-    
-    dist = pdist2(scale_kplus1,scale_k);
-    sigma = .25*median(dist(:));
-    A = exp(-dist.^2/sigma.^2);
-    A = bsxfun(@times,A,1./sum(A,2));
-    A = bsxfun(@times,A,1./sqrt(sum(A,1)));
-%     K_k = A'*bsxfun(@times,A,1./sum(A,1));
-    K_k = A*A';
-    kernels_asym{k} = A;
-    kernels_sym{k} = K_k;
-    
-    dist_mat{k} = squareform(pdist(K_k^difft));
-
-    disp(k);
-end
-figure
-subplot(1,2,1);
-imagesc(dist_mat{numIter})
-colorbar
-axis image
-subplot(1,2,2);
-imagesc(squareform(pdist(centers{numIter})))
-colorbar
-axis image
-
-
-%% Doesn't work well, but only way I can think of to connect different levels
-kernels_multi = cell(numIter-1,1);
-kernels_multi{numIter-1} = kernels_sym{numIter-1};
-for k=numIter-2:-1:1
-    K = kernels_asym{k}'*kernels_multi{k+1}*kernels_asym{k};
-    kernels_multi{k} = K;
-end
-
-for k=1:numIter-1
-    subplot(numIter-1,2,2*k-1);
-    imagesc(kernels_sym{k}^2)
-    axis image
-    subplot(numIter-1,2,2*k);
-    imagesc(kernels_multi{k})
-    axis image
-end
