@@ -44,9 +44,12 @@ x3 = [x3 zeros(size(x3,1),m1 - mMiddle)];
 [~,ind] = sort(x3(:,1));
 x3 = x3(ind,:);
 
+
 X = [x1;x2;x3];
 scatter3(X(:,1),X(:,2),X(:,3),20);
 axis image
+
+csvwrite('../../Data/twoblob.csv',X)
 
 
 
@@ -63,6 +66,8 @@ centers = cell(numIter,1);
 for k = 1:numIter
     numClust = 2^k;
     [L,C] = kmeans_plusplus(X',numClust);
+    % L is that association of points to centers.
+    % C defines the centers.
     C = C';
     
     % just sorting for visualization purposes
