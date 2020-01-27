@@ -14,10 +14,10 @@ clear all; close all; clc;
 
 %high dim spheres with 2D plane connecting 
 d=5;
-N1 = 5000; m1=d; %change to make spheres at ends higher dimensional
-N2 = 5000; m2=d; %change to make spheres at ends higher dimensional
+N1 = 20000; m1=d; %change to make spheres at ends higher dimensional
+N2 = 20000; m2=d; %change to make spheres at ends higher dimensional
 distBetween = 2;
-Nmiddle = 2000; mMiddle = 2;
+Nmiddle = 20000; mMiddle = 2;
 thickMiddle = 1;
 
 x1 = randn(N1,m1);
