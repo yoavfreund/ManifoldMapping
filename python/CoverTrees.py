@@ -1,5 +1,58 @@
-class CoverTree(object):
+"""
+Generate and manage cover trees.
+
+Minimal description
+"""
+
+import random
+import numpy as np
+import pandas as pd
+import pylab as py
+from Kmeans import Kmeans
+
+#%%
+import sys
+_MAX = sys.float_info.max
+
+def _dist(x,y):
+    """
+    Compute the distance between two points. Euclidean distance between 1D numpy arrays.
+
+    Parameters
+    ----------
+    x: numpy array
+        First Point
+    y: numpy array
+        Second Point 
+
+    Returns
+    -------
+    float
+    Euclidean distance
+
+    """
+    return np.sqrt(np.sum((x-y)**2))
+    
+class CoverTreeNode(object):
+    
     def __init__(self,center,radius,path):
+        """
+        Defines a node in a covertree
+
+        Parameters
+        ----------        
+        center: point  
+            The center of the region for this node
+        radius: positive float
+            Only points whose distance from center is at most radius are included in the node
+        path:   a list of CoverTrees
+            A sequence of nodes that defines the tree path leading to this node.
+
+        Returns
+        -------
+        None.
+
+        """
         self.center=center
         self.radius=radius
         self.counter=1  # number of points covered by this tree
@@ -9,15 +62,31 @@ class CoverTree(object):
     
     def dist_to_x(self,x):
         return _dist(x,self.center)
+
     def covers(self,x):
         return self.dist_to_x(x) < self.radius
         
     def no_of_children(self):
         return len(self.children)
+
     def get_level(self):
         return len(self.path)
     
     def find_path(self,x):
+        """
+        Find the path in the current tree for the point x.
+
+        Parameters
+        ----------
+        x : point
+            point for which we want to know the tree path.
+
+        Returns
+        -------
+        list of CoverTreeNode s
+            The list of nodes that contain the point x
+
+        """
         d= _dist(x,self.center)
         #print(str(self.path),d)
         if d>self.radius:
@@ -28,36 +97,63 @@ class CoverTree(object):
             for child in self.children:
                 child_path = child.find_path(x)
                 if child_path is None:
-                    [self]
+                    return [self]
                 else:
                     return [self]+child_path
             return [self]
 
     def insert(self,x):
+        """
+        Add a new node that contains a given point.  
+        Fails if node is outside of the ballof the root.
+
+        Parameters
+        ----------
+        x : point
+            The point to seed the new node
+
+        Returns
+        -------
+        bool
+            Success/Failure 
+
+        """
         path=self.find_path(x)
         if path is None:
             return False
 
         #found a non-trivial path
         leaf=path[-1]
-        new=CoverTree(x,leaf.radius/2,leaf.path+(leaf.no_of_children(),))
+        new=CoverTreeNode(x,leaf.radius/2,leaf.path+(leaf.no_of_children(),))
         leaf.children.append(new)
         for node in path:
             node.counter +=1
         return True
-            
-        
+                    
     def collect_centers(self):
-        '''Collect all of the centers defined by a tree
-        returns a list where each element is a center, followed by the level of the center'''
+        """
+        Collect all of the centers defined by a tree.
+
+        Returns
+        -------
+        C : list
+            returns a list where each element is a center, followed by the level of the center
+        """
         C=[(self.center,len(self.path))]
         if len(self.children)>0:
             for child in self.children:
                 C = C+ child.collect_centers()
         return C
-            
+           
     def collect_nodes(self):
-        '''returns a list of all nodes in the tree'''
+        """
+        Create list of nodes.
+        
+        Returns
+        -------
+        N : list
+            returns a list of all nodes in the tree
+        """
         N=[self]
         if len(self.children)>0:
             for child in self.children:
@@ -65,41 +161,103 @@ class CoverTree(object):
         return N
 
     def __str__(self):
+        """
+        Create a string describing this node.
+
+        Returns
+        -------
+        string
+            description of the node
+
+        """
         return str(self.path)+': r=%4.2f, no_child=%d, count=%d'%(self.radius,len(self.children),self.counter)
 
-    def _str_to_level(self,max_level):
+    def _str_to_level(self,max_level=0,print_leaves=False):
+        """
+        Create a string that descibes the nodes along the path to this node.
+
+        Parameters
+        ----------
+        max_level : integer
+            The maximal level  The default is 0 which correspond to unlimited level.
+        print_initial : Boolean
+            print all nodes, including leaves, The default is False (don't print leaves')
+
+        Returns
+        -------
+        s : string
+            string.
+
+        """
         s=self.__str__()+'\n'
         if self.get_level() < max_level and len(self.children)>0:
             for i in range(len(self.children)):
-                s+=self.children[i]._str_to_level(max_level)
+                child=self.children[i]
+                if child.state.get_state() != 'initial':
+                    s+=child._str_to_level(max_level)
         return s    
 
 class NodeState:
-    states = ('initial',\ # initial state, do nothing
-              'seed',\    # collect centers
-              'refine',\  # refine centers
+    """
+       states = ('initial', # initial state, collect statistics
+              'seed',    # collect centers
+              'refine',  # refine centers
+              'passThrough') # only collect statistics, advance children from 'initial' to 'seed'
+    """
+    states = ('initial', # initial state, collect statistics
+              'seed',    # collect centers
+              'refine',  # refine centers
               'passThrough') # only collect statistics, advance children from 'initial' to 'seed'
     def __init__(self):
         self.state = 'initial'
     def get_state(self):
         return self.state
     def set_state(self,state):
-        assert(str(state) in states)
+        assert(str(state) in NodeState.states)
         self.state=state
-    
-    
-    
-class ElaboratedTree(CoverTree):
-    def __init__(self,center,radius,path,mode='initial'):
+        
+class ElaboratedTreeNode(CoverTreeNode):
+    def __init__(self,center,radius,path,thr=0.9,alpha=0.1,max_children=10):
+        """
+        Initialize and elaboratedTreeNode
+
+        Parameters
+        ----------
+        center, radius, path : 
+            as defined in CoverTreeNode.__init__()
+        thr : TYPE, optional
+            The minimal estimated coverage of the node to allow it's children to grow. The default is 0.9.
+        alpha : TYPE, optional
+                The mixing coefficient for the estimator: estim=(1-alpha)*estim + alpha*new value
+        Returns
+        -------
+        None.
+
+        """
         super().__init__(center,radius,path)
         self.covered_fraction = 0
         self.state = NodeState()
+        self.thr=thr
+        self.alpha=alpha
+        self.points=[]  # collects point the are covered by this node
+        self.max_children=max_children
+        self.cost=-1
 
     def find_closest_child(self,x):
-        """ find the child of this node that is closest to x
-        :param x: 
-        :returns: 
-        :rtype: 
+        """
+        Find the child of this node whose center is closest to x
+
+        Parameters
+        ----------
+        x : point
+
+        Returns
+        -------
+        closest_child: ElaboratedTreeNode
+        the closest child
+        
+        _min_d: float
+        distance from the closest child.
         """
         if self.no_of_children() ==0:
             return None,None
@@ -110,7 +268,7 @@ class ElaboratedTree(CoverTree):
             if _d < _min_d:
                 closest_child=child
                 _min_d=_d
-        assert(not closest_child is None)
+        assert(not closest_child is None), "find_closest_child failed, x=%f"%x+'node=\n'+str(self)
         return closest_child,_min_d
 
     def find_path(self,x):
@@ -122,49 +280,43 @@ class ElaboratedTree(CoverTree):
         :rtype: a list of nodes
         """
 
-        d= self.dist_to_x(x)
-        #print(str(self.path),d)
-        if d>self.radius:
-             return None
         if len(self.children)==0:
             return [self]
         else:
             closest_child,distance = self.find_closest_child(x)
-            if closest_child is None or not closest_child.covers(x):
+            if closest_child is None:
                 return [self]
             else:
                 child_path = closest_child.find_path(x)
-                print(child_path,closest_child)
                 return [self]+child_path
     
     def conditionally_add_child(self,x):
-        """ check altered kmeans++ condition and conditionally add point x
-            Assumes mode of parent is such that addition is allowed
+        """ Decide whether to add new child 
         :param x: 
-        :returns: 0 if too close, 1 if far but did not add, 2 if add
+        :returns: covered or init or filter-add or filter-discard
         :rtype: 
 
         """
-
-        _child,d = self.find_closest_child(x)
         if self.no_of_children()==0:
-            self.add_child(self.center)  # add parent point as child
-            return 2
+            self.add_child(self.center)  # add parent center as child
+            return 'init'
+        _child,d = self.find_closest_child(x)
         assert(d != None)
-        r=self.radius/2
-        print('conditionally_add_child d=%6.2f,r=%6.2f'%(d,r))
-        d=min(d,2*r)
-        if d is None or d<r: #Add only points that are at least radius/2 from closest center.
-            return 0
+
+        r=_child.radius
+        if d <= r: 
+            return 'covered'
         else:                   # if d>r far from center use modified kmeans++ rule
             P=min(1.0,((d-r)/r)**2)
-            print('d=%4.2f, r=%4.2f'%(d,r),end=' ')
-            print('adding point with P=%f'%P,end=', ')
+            #print('d=%4.2f, r=%4.2f'%(d,r),end=' ')
+            #print('adding point with P=%f'%P,end=', ')
             if random.random()<P:
-                print(self.path,' Success') 
+                #print(self.path,' Success') 
                 self.add_child(x)
-                return 2
-            return 1
+                return 'filter-add'
+            else:
+                #print(self.path,' Fail')
+                return 'filter-discard'
             
 
     def add_child(self,x):
@@ -173,12 +325,11 @@ class ElaboratedTree(CoverTree):
         :param x: 
 
         """
-        new=ElaboratedTree(x,self.radius/2,self.path+(self.no_of_children(),))
+        new=ElaboratedTreeNode(x,self.radius/2,self.path+(self.no_of_children(),))
         self.children.append(new)
         
     def insert(self,x):
         """ insert an example into this node.
-
         :param x: 
         :returns: Flag indicating whether example was rejected.
         :rtype: Flag
@@ -186,36 +337,86 @@ class ElaboratedTree(CoverTree):
         """
         if not self.covers(x):
             return False
+        self.points.append(x)
         state = self.state.get_state()
         if state=='initial': # initial state, do nothing
             pass
-        if state=='seed':
+        if state=='seed':                    
+            self.points.append(x)
             add_status = self.conditionally_add_child(x);
-            if add_status==2:
-                self.covered_fraction = (1-alpha)*self.covered_fraction + alpha
-            elif add_status==0 or add_status==1:
-                parent.covered_fraction = (1-alpha)*self.covered_fraction
-            if self.covered>thr:
-                print('node'+str(self.path)+\
-                      'finished seeding frac=%7.5f, count= %d, siblings=%2d'\
-                      %(self.covered_fraction,self.counter,self.no_of_children()))
-                self.set_status('refine')
-        if state=='refine':
-            pass
+            if add_status in ['init','covered']: 
+                self.covered_fraction = (1-self.alpha)*self.covered_fraction + self.alpha
+            else:
+                self.covered_fraction = (1-self.alpha)*self.covered_fraction
+            if self.covered_fraction>self.thr:
+                print('node'+str(self.path)+
+                      'finished seeding frac=%7.5f, no of points = %d, no of children=%2d'\
+                      %(self.covered_fraction,len(self.points),self.no_of_children()),end=' ')
+                self.state.set_state('refine')
+                self.refine()
+                print('cost = %7.5f'%self.cost)
+                self.state.set_state('passThrough')
         if state=='passThrough':
-            pass
+            _child,d = self.find_closest_child(x)
+            _child.insert(x)
 
+    def refine(self):
+        Centers=[_child.center for _child in self.children]
+        self.cost,newCenters=Kmeans(self.points,Centers)
+        push_through = self.no_of_children() <= self.max_children
+        for i in range(len(self.children)):
+            child=self.children[i]
+            child.center = newCenters[i]
+            if push_through: 
+                child.state.set_state('seed')
+        
     def __str__(self):
-        return str(self.path)+': r=%4.2f, no_child=%d, count=%d, cov_frac=%4.3f, punch_through=%1d'\
-                %(self.radius,len(self.children),self.counter,self.covered_fraction,int(self.punch_through))
+        return str(self.path)+': r=%4.2f, state= %s, no_child=%d, count=%d, cov_frac=%4.3f, cost=%4.3f'\
+                %(self.radius,self.state.get_state(),len(self.children),len(self.points),self.covered_fraction,self.cost)
 
 def gen_scatter(T,data,level=0):
     C=[]
     for i in range(data.shape[0]):
         point=np.array(data.iloc[i,:])
+        #print(T.find_path(point))
         C.append(T.find_path(point)[-1].path[level])
 
-    figure(figsize=[15,5])
-    scatter(data[0],data[1],s=1,c=C,alpha=0.2)
+    py.figure(figsize=[15,5])
+    py.scatter(data[0],data[1],s=1,c=C,alpha=0.2)
     t='Level=%d, colors=%d'%(level,max(C)+1)
-    title(t);
+    py.title(t);
+
+if __name__=='__main__':
+    data = pd.read_csv('../../Data/twoBlob.csv',header=None)
+    print(data.shape)
+    np.random.shuffle(data.values)
+    #data=data.iloc[:1000,:]
+    center=np.mean(data,axis=0)
+    T=ElaboratedTreeNode(center,radius=4,path=(),alpha=0.01,thr=0.99)
+    print(T._str_to_level(1))
+    
+    T.state.set_state('seed')
+    #%%
+    for i in range(1,data.shape[0]):
+#    for i in range(1,):
+        point=np.array(data.iloc[i,:])
+        T.insert(point)
+    
+    print(T._str_to_level(2))
+    Nodes = T.collect_nodes()
+    C=[]
+    for node in Nodes:
+        if node.state.get_state() in ['seed','passThrough']:
+            n=node.no_of_children()
+            d=np.log(n+1)/np.log(2.)
+            if n<10:
+                C.append((node.center,d,node.path)) 
+    centers=np.array([c[0] for c in C])
+    D=[c[1] for c in C]
+    max_d=np.max(D)
+    S=[(max_d+3-d)*50 for d in D]
+    gen_scatter(T,data,level=0)
+    py.scatter(centers[:,0],centers[:,1],c=D,s=S)
+    print()
+    
+    
