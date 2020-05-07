@@ -4,6 +4,7 @@ from numpy.linalg import norm
 import numpy as np
 import pylab as pl
 from matplotlib import collections  as mc
+import json as js
 
 # Ufunc are a way to vectorize python functions so that they execute efficiently on numpy arrays.
 def _diff(x,y):
@@ -51,15 +52,19 @@ def Compute_edges(X,max_dist=0.2):
     _Small = _Dist<max_dist
 
     pairs=np.nonzero(_Small)
-
+    new_pairs=[[],[]]
     segments=[]
     for i in range(len(pairs[0])):
         c0=pairs[0][i]
         c1=pairs[1][i]
         if c0>c1:
+            new_pairs[0].append(c0)
+            new_pairs[1].append(c1)
             segment=[tuple(X[c0,:]),tuple(X[c1,:])]
             segments.append(segment)
-    return segments,pairs
+    new_pairs=[np.array(new_pairs[0]),np.array(new_pairs[1])]
+    print('pairs:%d,new_pairs:%d'%(pairs[0].shape[0],new_pairs[0].shape[0]))
+    return segments,new_pairs
 
 def plot_graph(X,segments):
     lc = mc.LineCollection(segments, colors='r', linewidths=0.1)
@@ -88,18 +93,12 @@ def graph2json(X,pairs):
           "edges":edges}
     return Dict
 
-#X=squareNet(epsilon=0.05)
-
-# X=unifSquare(n=200)
-
-# segments,pairs=Compute_edges(X,max_dist=0.12)
-
 #_type="uniform"
 _type='epsilonCover'
-n=500
+n=1000
 m=100
-epsilon=0.05
-max_dist=0.15
+epsilon=0.03
+max_dist=0.1
 scale=1/3.
 
 if _type=="uniform":
@@ -117,6 +116,5 @@ plot_graph(X,segments)
 D=graph2json(X,pairs)
 
 with open(filename, 'w') as json_file:
-    js.dump(Dict,json_file)
-    print('done with '+filename)
-
+    js.dump(D,json_file)
+    print('\n done with '+filename)
