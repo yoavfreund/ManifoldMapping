@@ -6,11 +6,11 @@ Minimal description
 
 import random
 import numpy as np
-import pandas as pd
+#import pandas as pd
 import pylab as py
 from Kmeans import Kmeans
+from Generators import SwissGenerator, DataGenerator
 
-#%%
 import sys
 _MAX = sys.float_info.max
 
@@ -386,37 +386,23 @@ def gen_scatter(T,data,level=0):
     t='Level=%d, colors=%d'%(level,max(C)+1)
     py.title(t);
 
-if __name__=='__main__':
-    data = pd.read_csv('../../Data/twoBlob.csv',header=None)
-    print(data.shape)
-    np.random.shuffle(data.values)
-    #data=data.iloc[:1000,:]
+
+
+if __name__=='__main__':    
+    print('start')
+    generator=DataGenerator()
+    
+    data=generator.Sample(n=10000)
     center=np.mean(data,axis=0)
-    T=ElaboratedTreeNode(center,radius=4,path=(),alpha=0.01,thr=0.99)
-    print(T._str_to_level(1))
+    T=ElaboratedTreeNode(center,radius=1,path=(),alpha=0.01,thr=0.99)
     
     T.state.set_state('seed')
-    #%%
+
     for i in range(1,data.shape[0]):
-#    for i in range(1,):
-        point=np.array(data.iloc[i,:])
+        print('\r',i,end='')
+        point=np.array(data[i,:])
         T.insert(point)
-    
-    print(T._str_to_level(2))
-    Nodes = T.collect_nodes()
-    C=[]
-    for node in Nodes:
-        if node.state.get_state() in ['seed','passThrough']:
-            n=node.no_of_children()
-            d=np.log(n+1)/np.log(2.)
-            if n<10:
-                C.append((node.center,d,node.path)) 
-    centers=np.array([c[0] for c in C])
-    D=[c[1] for c in C]
-    max_d=np.max(D)
-    S=[(max_d+3-d)*50 for d in D]
-    gen_scatter(T,data,level=0)
-    py.scatter(centers[:,0],centers[:,1],c=D,s=S)
-    print()
-    
+
+    print(T._str_to_level(3))
+
     
