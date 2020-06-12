@@ -2,7 +2,7 @@
 from numpy.matlib import repmat
 import numpy as np
 
-def Kmeans(points,centers,max_iter=10):
+def Kmeans(points,centers,max_iter=10,stationary=[]):
     """
     Refine the centers using the Kmeans algorithm
 
@@ -11,7 +11,8 @@ def Kmeans(points,centers,max_iter=10):
     points : list or np.array
         The points to be estimated using the centers
     centers : list or np.array
-        The centers
+        The centers. 
+    stationary: A list of indices of centers that are not to be moved.
     max_iter : int, optional
         DESCRIPTION. the maximal number of iterations. 
         Stop earlier if reached a statiobary point. The default is 10.
@@ -29,9 +30,9 @@ def Kmeans(points,centers,max_iter=10):
     if type(centers) !=np.ndarray:
         centers=np.stack(centers)
     last_cost=-1
-    for iter in range(5):
+    for _iter in range(5):
         nearest=[]; dists=[]
-        for i in range(points.shape[0]): 
+        for i in range(points.shape[0]):
            P=points[i,:]
            Prep=repmat(P,centers.shape[0],1)
            diff=(centers - Prep)**2
@@ -47,6 +48,8 @@ def Kmeans(points,centers,max_iter=10):
         else:
             last_cost=cost
         for i in range(centers.shape[0]):
+            if i in stationary:
+                continue
             closest=points[nearest==i,:]
             # print("i=%d, closest.no=%d"%(i,closest.shape[0]))
             if closest.shape[0]>0:

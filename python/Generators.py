@@ -70,7 +70,9 @@ def _distances(X,Z):
 
     return ufunc_sqrt(D)
 
-class DataGenerator:    
+class DataGenerator:
+
+    debug=False
     
     def __init__(self,noise=0,dim=2):
 
@@ -141,7 +143,7 @@ class SwissGenerator(DataGenerator):
             
      
 #####################    
-def Compute_edges(X,max_dist=0.2):
+def Compute_edges(X,max_dist=0.2,debug=False):
     """Compute the edges whose length is smaller than max_dist
     
     Returns
@@ -164,7 +166,8 @@ def Compute_edges(X,max_dist=0.2):
             segment=np.stack([X[c0,:],X[c1,:]],axis=0)
             segments.append(segment)
     new_pairs=[np.array(new_pairs[0]),np.array(new_pairs[1])]
-    print('pairs:%d,new_pairs:%d'%(pairs[0].shape[0],new_pairs[0].shape[0]))
+    if debug:
+        print('pairs:%d,new_pairs:%d'%(pairs[0].shape[0],new_pairs[0].shape[0]))
     return {"nodes_no":_Dist.shape[0],
             "segments":segments,
             "new_pairs":new_pairs}
@@ -176,22 +179,6 @@ def plot_graph(X,segments):
     fig, ax = pl.subplots(figsize=[12*(_max-_min),12])
     ax.plot(X[:,0],X[:,1],'.');
     ax.add_collection(lc)
-    #ax.set_xlim([0,1])
-    
-if __name__ == "__main__":
-    from pointsToJson import generate_json
-    #from matplotlib.pylab import scatter
-    generator=DataGenerator()
-    i=0
-    
-    #X=generator.Sample(n=100)
-    
-    X=generator.epsilonNet(n=1000,epsilon=0.15)
-    print(X.shape)
-
-    edges=Compute_edges(X,max_dist=0.35)
-    
-    plot_graph(X,edges['segments'])
-    generate_json(edges,'epsilon.json')
 
     
+
